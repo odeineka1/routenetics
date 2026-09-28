@@ -1,0 +1,96 @@
+# Routenetics
+
+A Traveling Salesman / Vehicle Routing solver built from scratch in Python, using a genetic algorithm for larger problem sizes and exhaustive brute force for small ones — solving on **real road data**, not straight-line distances.
+
+Given a warehouse and a list of delivery stops, Routenetics finds a low-cost visiting order using actual driving durations and distances pulled from OSRM (Open Source Routing Machine), rather than assuming a vehicle can travel in a straight line between two points.
+
+---
+
+## Why this exists
+
+Most TSP demos solve toy problems on random coordinates. This project was built to go one step further: solve on real coordinates, real road networks, and validate every design decision empirically rather than by intuition — including deliberately testing and rejecting a feature that seemed like a good idea on paper but didn't hold up under measurement (more on that below).
+
+---
+
+## How it works
+
+### Small instances → brute force
+For 8 or fewer destinations, Routenetics checks every possible permutation and returns the guaranteed optimal route. This also serves as ground truth: the genetic algorithm's output was checked against brute force on 10–12 destination instances to confirm it reliably finds the true optimum before trusting it on larger, unverifiable problem sizes.
+
+### Larger instances → genetic algorithm
+For anything larger, an exhaustive search is computationally infeasible (a 30-stop problem has more possible routes than atoms in the observable universe), so the GA searches instead:
+
+- **Representation:** each individual is a permutation of destination indices, starting and ending at the depot.
+- **Fitness:** total travel duration along the route, computed from a real OSRM duration matrix.
+- **Selection:** tournament selection (sample 3 individuals at random, the fittest wins) — chosen over simpler roulette-wheel selection because it preserves more population diversity while still applying real selection pressure.
+- **Elitism:** the top 2% of each generation survive unchanged, guaranteeing the best-found solution is never lost to bad luck in crossover or mutation.
+- **Crossover:** an order-preserving crossover — a contiguous segment is copied from one parent, and the remaining stops are filled in the order they appear in the second parent, guaranteeing every child is a valid permutation (no duplicated or missing stops).
+- **Mutation:** inversion mutation (reverse a random segment of the route) — chosen specifically because, unlike naive point-mutation, it can never produce an invalid permutation.
+- **Adaptive mutation rate:** the mutation rate starts low (2%) and ramps up automatically the longer the best solution goes without improving, then resets the moment progress resumes. This was validated by tracking generations-since-improvement directly, rather than assumed to work.
+
+### A feature I built, tested, and removed
+Early on, I hypothesized that populations could prematurely converge (all individuals becoming near-identical), and built a second mechanism to detect this directly — measuring genetic diversity via pairwise route-edge overlap — and inject fresh random "immigrant" individuals when diversity collapsed, deliberately forcing them to breed with fit individuals so they wouldn't just be discarded.
+
+I then ran a controlled comparison: the same algorithm, same problem, same random seeds, with and without this mechanism, across multiple population sizes and generation counts (10+ seeds per condition). **The data showed the immigrant system didn't outperform the plain baseline** — in some configurations it was measurably worse, and in no configuration was it clearly better. Rather than keep a feature because it "sounded like it should work," I removed it and kept only the mutation-rate adaptation, which *did* show a measurable, reproducible benefit under the same kind of testing.
+
+This is deliberately left as one of the lessons of the project: not every plausible-sounding idea holds up, and the only way to know is to measure it.
+
+---
+
+## Real-world data, not toy coordinates
+
+Routenetics pulls actual driving durations and distances between every pair of stops from OSRM's `/table` service, so the "cost" the algorithm optimizes for reflects real roads, not straight-line assumptions. It also fetches the actual road-following geometry for the final route (via OSRM's `/route` service) for visualization purposes.
+
+---
+
+## Visualization
+
+The project includes an animated, browser-based visualization (shown below as a GIF) of the algorithm evolving generation-by-generation on a real map — including a duration chart, a mutation-rate chart, per-edge hover tooltips with real travel time/distance for each hop, a toggleable overlay comparing the straight-line route against the real road-following path, and a comparison against a naive (unoptimized, visit-stops-in-list-order) baseline.
+
+![Route evolution demo](docs/evolution-demo.gif)
+
+> **Note:** the visualization tooling (the HTML/JS map, charts, and playback UI) was prototyped with AI assistance and is not included in this repository — only the resulting GIF is shown here for demonstration. The genetic algorithm, data pipeline, and CLI below are what this repo actually contains and what I built and iterated on.
+
+---
+
+## Usage
+
+```bash
+python3 main.py --file points.csv --pop_size 5000 --generations 150
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--file` | `points.csv` | CSV of destinations (`point_name,latitude,longitude`), read from `data/` |
+| `--pop_size` | `5000` | Population size for the genetic algorithm |
+| `--generations` | `150` | Number of generations to run |
+
+Input format:
+```csv
+point_name,latitude,longitude
+Warehouse_Alpha,49.0275,24.3562
+Delivery_Hub_1,48.9226,24.7111
+...
+```
+
+---
+
+## Project structure
+
+```
+routenetics/
+├── main.py          # entry point, wires the pipeline together
+├── ingestion.py      # CSV loading
+├── network.py        # OSRM API calls (duration/distance matrix, route geometry)
+├── engine.py          # brute force + genetic algorithm
+├── cli.py             # argument parsing
+└── data/
+    └── points.csv
+```
+
+---
+
+## Possible extensions
+
+- **CVRPTW** (Capacitated Vehicle Routing with Time Windows) — multiple vehicles, capacity limits, and delivery time windows, generalizing the current single-route solver into a real multi-vehicle dispatch problem.
+- **Larger-scale validation** — the immigrant-injection finding above was tested at two problem scales; a wider sweep across problem sizes and topologies would strengthen (or overturn) that conclusion.
