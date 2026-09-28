@@ -4,6 +4,11 @@ A delivery route optimizer (Traveling Salesman Problem solution) that solves a p
 
 ## Demo
 
+Visualization of evolution 
+![Route visualization of evolution demo](assets/visual_demo.gif)
+> Note: the visualization tooling (the HTML/JS map, charts, and playback UI) was prototyped with AI assistance and is not included in this repository — only the resulting GIF is shown here for demonstration. The genetic algorithm, data pipeline, and CLI below are what this repo actually contains and what I built and iterated on.
+
+CLI demo
 ![Route evolution demo](assets/cli_demo.jpg)
 
 
